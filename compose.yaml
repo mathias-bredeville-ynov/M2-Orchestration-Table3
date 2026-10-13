@@ -1,0 +1,108 @@
+name: nextcloud
+
+x-common: &common
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  proxy:
+    <<: *common
+    build: ./proxy
+    environment:
+      NEXTCLOUD_DOMAIN: ${NEXTCLOUD_DOMAIN}
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8443:8443"
+    volumes:
+      - caddy_data:/data
+    cap_drop: [ALL]
+    read_only: true
+    networks: [frontend]
+    depends_on: [app]
+
+  app:
+    <<: *common
+    image: nextcloud:${NEXTCLOUD_VERSION}
+    environment:
+      MYSQL_HOST: db
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD_FILE: /run/secrets/db_password
+      REDIS_HOST: redis
+      REDIS_HOST_PASSWORD_FILE: /run/secrets/redis_password
+      NEXTCLOUD_ADMIN_USER: ${NEXTCLOUD_ADMIN_USER}
+      NEXTCLOUD_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+      NEXTCLOUD_TRUSTED_DOMAINS: ${NEXTCLOUD_DOMAIN}
+      TRUSTED_PROXIES: 172.30.0.0/24
+      OVERWRITEPROTOCOL: https
+    volumes:
+      - nextcloud:/var/www/html
+    secrets: [db_password, redis_password, admin_password]
+    networks: [frontend, backend]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  cron:
+    <<: *common
+    image: nextcloud:${NEXTCLOUD_VERSION}
+    entrypoint: /cron.sh
+    volumes:
+      - nextcloud:/var/www/html
+    networks: [backend]
+    depends_on: [app]
+
+  db:
+    <<: *common
+    image: mariadb:${MARIADB_VERSION}
+    command: --transaction-isolation=READ-COMMITTED --log-bin=binlog --binlog-format=ROW
+    environment:
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+      MARIADB_DATABASE: nextcloud
+      MARIADB_USER: nextcloud
+      MARIADB_PASSWORD_FILE: /run/secrets/db_password
+    volumes:
+      - db:/var/lib/mysql
+    secrets: [db_root_password, db_password]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      retries: 10
+
+  redis:
+    <<: *common
+    image: redis:${REDIS_VERSION}
+    user: "999:1000"
+    command: sh -c 'exec redis-server --requirepass "$$(cat /run/secrets/redis_password)" --save ""'
+    secrets: [redis_password]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/data]
+    networks: [backend]
+
+networks:
+  frontend:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  backend:
+    internal: true # pas d'accès internet pour db/redis
+
+volumes:
+  nextcloud:
+  db:
+  caddy_data:
+
+secrets:
+  db_root_password:
+    file: ./secrets/db_root_password
+  db_password:
+    file: ./secrets/db_password
+  redis_password:
+    file: ./secrets/redis_password
+  admin_password:
+    file: ./secrets/admin_password
