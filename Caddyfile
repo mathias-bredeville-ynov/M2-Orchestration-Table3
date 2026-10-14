@@ -1,0 +1,24 @@
+{
+	# Pas de télémétrie ni d'API d'admin exposée
+	admin off
+}
+
+localhost {
+	# Certificat auto-signé généré par l'autorité locale de Caddy
+	# (en production avec un vrai domaine : supprimer cette ligne → Let's Encrypt automatique)
+	tls internal
+
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+		-X-Powered-By
+	}
+
+	# Découverte CalDAV / CardDAV (évite un avertissement Nextcloud)
+	redir /.well-known/carddav /remote.php/dav 301
+	redir /.well-known/caldav /remote.php/dav 301
+
+	reverse_proxy app:80
+}
