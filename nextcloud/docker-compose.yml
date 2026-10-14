@@ -1,5 +1,35 @@
 services:
 
+  vault-agent:
+    build:
+      context: ./vault-agent
+      dockerfile: Dockerfile
+
+    container_name: vault-agent
+    restart: unless-stopped
+
+    environment:
+      VAULT_ROLE_ID: "${VAULT_ROLE_ID}"
+      VAULT_SECRET_ID: "${VAULT_SECRET_ID}"
+
+    volumes:
+      - vault-secrets:/vault/secrets
+
+    networks:
+      - nextcloud-net
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "test -s /vault/secrets/db_password && test -s /vault/secrets/db_root_password && test -s /vault/secrets/nextcloud_admin_password"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+
   db:
     image: mariadb:11
     container_name: nextcloud-db
@@ -8,18 +38,20 @@ services:
     environment:
       MYSQL_DATABASE: nextcloud
       MYSQL_USER: nextcloud
+
       MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
       MYSQL_PASSWORD_FILE: /run/secrets/db_password
 
     volumes:
       - db_data:/var/lib/mysql
+      - vault-secrets:/run/secrets:ro
 
     networks:
       - nextcloud-net
 
-    secrets:
-      - db_root_password
-      - db_password
+    depends_on:
+      vault-agent:
+        condition: service_healthy
 
 
   nextcloud:
@@ -46,16 +78,16 @@ services:
 
     volumes:
       - nextcloud_data:/var/www/html
+      - vault-secrets:/run/secrets:ro
 
     networks:
       - nextcloud-net
 
-    secrets:
-      - db_password
-      - nextcloud_admin_password
-
     depends_on:
-      - db
+      vault-agent:
+        condition: service_healthy
+      db:
+        condition: service_started
 
 
 networks:
@@ -66,15 +98,4 @@ networks:
 volumes:
   db_data:
   nextcloud_data:
-
-
-secrets:
-
-  db_root_password:
-    file: ./secrets/db_root_password.txt
-
-  db_password:
-    file: ./secrets/db_password.txt
-
-  nextcloud_admin_password:
-    file: ./secrets/nextcloud_admin_password.txt
+  vault-secrets:
