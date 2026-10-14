@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEPLOY_BRANCH: Mathias-Nextcloud
+  DEPLOY_DIR: /home/azureuser/M2-Orchestration-Table3/M2-Orchestration-Table3
+  DOMAIN: ynov-orchestration-table3.duckdns.org
+
+jobs:
+  # vérifie que le compose est valide, sur un runner github (pas sur la VM)
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # actions épinglées par SHA (des tags de trivy-action ont été réécrits en 2026)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validation du compose
+        run: |
+          cp .env.example .env
+          sh init-secrets.sh > /dev/null
+          docker compose config --quiet
+          echo "compose OK"
+
+  # scan des images utilisées par le compose, informatif (images officielles, on ne les corrige pas nous-mêmes)
+  scan:
+    runs-on: ubuntu-latest
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["caddy:2-alpine", "nextcloud:33-apache", "mariadb:11.4"]
+    steps:
+      - name: Trivy ${{ matrix.image }}
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          version: v0.69.3
+          image-ref: ${{ matrix.image }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+
+  # déploiement sur DockerV2, seulement sur un push de la branche de déploiement
+  deploy:
+    runs-on: [self-hosted, nextcloud-vm]
+    needs: [check, scan]
+    if: github.event_name != 'pull_request' && github.ref_name == 'Mathias-Nextcloud'
+    concurrency: deploy
+    defaults:
+      run:
+        working-directory: ${{ env.DEPLOY_DIR }}
+    steps:
+      - name: Mise à jour du code (exactement le commit testé)
+        run: |
+          git fetch origin "$DEPLOY_BRANCH"
+          git checkout "$DEPLOY_BRANCH"
+          git merge --ff-only "${{ github.sha }}"
+          git log -1 --oneline
+
+      - name: Écriture des secrets
+        env:
+          DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          for v in DB_ROOT_PASSWORD DB_PASSWORD ADMIN_PASSWORD; do
+            eval "[ -n \"\$$v\" ]" || { echo "secret github $v manquant"; exit 1; }
+          done
+          mkdir -p secrets && chmod 700 secrets
+          printf '%s' "$DB_ROOT_PASSWORD" > secrets/db_root_password
+          printf '%s' "$DB_PASSWORD"      > secrets/db_password
+          printf '%s' "$ADMIN_PASSWORD"   > secrets/admin_password
+          chmod 644 secrets/*
+
+      - name: Déploiement
+        run: |
+          docker compose pull
+          docker compose up -d --remove-orphans
+          docker compose ps
+
+      - name: Nextcloud répond
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsk --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/status.php" | grep -q '"installed":true'; then
+              echo "nextcloud OK"
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose logs --tail=50
+          exit 1
