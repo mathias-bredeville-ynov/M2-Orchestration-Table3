@@ -72,8 +72,8 @@ volumes:
 
 secrets:
   db_root_password:
-    file: ./secrets/db_root_password
+    environment: DB_ROOT_PASSWORD
   db_password:
-    file: ./secrets/db_password
+    environment: DB_PASSWORD
   admin_password:
-    file: ./secrets/admin_password
+    environment: ADMIN_PASSWORD
