@@ -1,0 +1,8 @@
+# Ignorer les fichiers de variables d'environnement (secrets)
+.env
+**/.env
+*.env
+
+# Optionnel : ignorer les dossiers de données locales (volumes Docker)
+db_data/
+nextcloud_data/

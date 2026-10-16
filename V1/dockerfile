@@ -1,0 +1,2 @@
+FROM nextcloud:apache
+USER www-data
