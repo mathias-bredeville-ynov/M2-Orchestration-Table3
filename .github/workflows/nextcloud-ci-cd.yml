@@ -1,0 +1,46 @@
+name: Nextcloud CI/CD
+
+on:
+  push:
+    branches:
+      - bastien-nextcloud
+
+jobs:
+
+  ci:
+    name: Build and scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Build Nextcloud image
+        run: |
+          cd nextcloud
+          docker build -t nextcloud-ci:${{ github.sha }} .
+
+      - name: Build Vault Agent image
+        run: |
+          cd nextcloud/vault-agent
+          docker build -t vault-agent-ci:${{ github.sha }} .
+
+      - name: Scan Nextcloud image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: nextcloud-ci:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
+
+      - name: Scan Vault Agent image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: vault-agent-ci:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
