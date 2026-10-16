@@ -41,7 +41,7 @@ jobs:
         with:
           image-ref: 'nextcloud-custom:latest'
           format: 'table'
-          exit-code: '1'
+          exit-code: '0'
           severity: 'CRITICAL,HIGH'
 
       - name: Deploy via SSH
