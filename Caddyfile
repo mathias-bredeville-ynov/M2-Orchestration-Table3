@@ -1,8 +1,0 @@
-{
-	# Pas de télémétrie ni d'API d'admin exposée
-	admin off
-}
-
-{$NEXTCLOUD_DOMAIN} {
-	reverse_proxy app:80
-}

@@ -1,39 +1,50 @@
-name: CI
+name: CI/CD
 
 on:
   push:
     branches: [Mathias-Nextcloud]
   workflow_dispatch:
 
-jobs:
-  scan:
-    runs-on: ubuntu-slim
-    strategy:
-      matrix:
-        image: ["caddy:2-alpine", "nextcloud:33-apache", "mariadb:11.4"]
-    steps:
-      - uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
-        with:
-          version: v0.69.3
-          image-ref: ${{ matrix.image }}
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
+env:
+  HOST: ynov-orchestration-table3.duckdns.org
+  APP_DIR: /home/deploy/M2-Orchestration-Table3
 
-  deploy:
-    runs-on: [self-hosted, nextcloud-vm]
-    needs: scan
+jobs:
+  build:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: hashicorp/vault-action@4c06c5ccf5c0761b6029f56cfb1dcf5565918a3b # v3.4.0
-        with:
-          url: http://127.0.0.1:8200
-          token: ${{ secrets.VAULT_AZURE_MATHIAS }}
-          secrets: |
-            secret/data/nextcloud db_root_password | DB_ROOT_PASSWORD ;
-            secret/data/nextcloud db_password | DB_PASSWORD ;
-            secret/data/nextcloud admin_password | ADMIN_PASSWORD ;
-            secret/data/nextcloud domain | NEXTCLOUD_DOMAIN ;
-            secret/data/nextcloud bind_ip | BIND_IP
+      - name: Build de l'image
+        run: docker build -t nextcloud-proxy:${{ github.sha }} ./proxy
 
-      - run: docker compose up -d
+      - name: Scan Trivy
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          version: v0.69.3
+          image-ref: nextcloud-proxy:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Connexion SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_MATHIAS }}" > ~/.ssh/id_ed25519
+          echo "${{ vars.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Docker installé
+        run: ssh deploy@$HOST "docker --version && docker compose version"
+
+      - name: Déploiement
+        run: ssh deploy@$HOST "$APP_DIR/deploy.sh"
+
+      - name: Healthchecks
+        run: |
+          ssh deploy@$HOST "docker compose -f $APP_DIR/compose.yaml ps"
+          curl -fsS https://$HOST/status.php
