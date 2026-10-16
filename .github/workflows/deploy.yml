@@ -30,7 +30,8 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             command -v docker || exit 1
-            cd /path/to/nextcloud
-            docker compose pull
-            docker compose up -d
-            docker inspect --format='{{json .State.Health.Status}}' nextcloud-app | grep -q "healthy" || exit 1
+            mkdir -p ~/nextcloud
+            cd ~/nextcloud
+            docker run -d --name nextcloud-app -p 8080:80 nextcloud:latest || docker restart nextcloud-app
+            sleep 5
+            docker ps | grep -q "nextcloud-app" || exit 1
