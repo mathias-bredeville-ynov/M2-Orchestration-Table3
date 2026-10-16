@@ -1,4 +1,4 @@
-name: CI/CD Pipeline - Docker Compose & Vault (Jalon CSI)
+name: Workflow CI/CD Mathis Dubaille
 
 # Créer le déclencheur (Push)
 on:
