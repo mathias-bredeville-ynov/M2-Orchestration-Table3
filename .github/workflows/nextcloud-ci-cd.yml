@@ -44,3 +44,58 @@ jobs:
           ignore-unfixed: true
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
+
+  cd:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: ci
+
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_BASTIEN }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.SSH_HOST_BASTIEN }}" >> ~/.ssh/known_hosts
+
+      - name: Test SSH
+        run: |
+          ssh "${{ secrets.SSH_USER_BASTIEN }}@${{ secrets.SSH_HOST_BASTIEN }}" \
+            "echo 'SSH OK'"
+
+      - name: Check Docker
+        run: |
+          ssh "${{ secrets.SSH_USER_BASTIEN }}@${{ secrets.SSH_HOST_BASTIEN }}" \
+            "docker --version && docker compose version"
+
+      - name: Deploy Nextcloud
+        run: |
+          ssh "${{ secrets.SSH_USER_BASTIEN }}@${{ secrets.SSH_HOST_BASTIEN }}" << 'EOF'
+            set -e
+
+            cd ~/TP-Docker/M2-Orchestration-Table3
+
+            git fetch origin
+            git switch bastien-nextcloud
+            git pull --rebase origin bastien-nextcloud
+
+            cd nextcloud
+
+            cat > .env << ENVEOF
+          VAULT_ROLE_ID=${{ secrets.VAULT_ROLE_ID_BASTIEN }}
+          VAULT_SECRET_ID=${{ secrets.VAULT_SECRET_ID_BASTIEN }}
+          ENVEOF
+
+            docker compose up -d --build
+          EOF
+
+      - name: Check containers
+        run: |
+          ssh "${{ secrets.SSH_USER_BASTIEN }}@${{ secrets.SSH_HOST_BASTIEN }}" \
+            "cd ~/TP-Docker/M2-Orchestration-Table3/nextcloud && docker compose ps"
+
+      - name: Healthcheck Nextcloud
+        run: |
+          sleep 15
+          curl --fail --retry 10 --retry-delay 5 \
+            http://${{ secrets.SSH_HOST_BASTIEN }}:8080/status.php
