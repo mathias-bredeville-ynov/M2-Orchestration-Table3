@@ -1,15 +1,16 @@
-name: Workflow CI/CD Mathis Dubaille
+name: Workflow CI-CD Mathis Dubaille
 
 on:
   push:
-    branches: [ "main", "Mathis-Nextcloud" ]
+    branches:
+      - Mathis-Nextcloud
 
 jobs:
   ci-cd-pipeline:
     runs-on: self-hosted
 
     steps:
-      - name: Récupération du code source
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Import Secrets from Vault
@@ -25,17 +26,17 @@ jobs:
             secret/data/nextcloud VPS_ID | VPS_USERNAME ;
             secret/data/nextcloud VPS_SSH_KEY | VPS_SSH_KEY
 
-      - name: Configuration de Docker Buildx
+      - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build de l'image locale
+      - name: Build image
         uses: docker/build-push-action@v5
         with:
           context: ./V1
           load: true
           tags: nextcloud-custom:latest
 
-      - name: Scan de vulnérabilités Trivy
+      - name: Scan with Trivy
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: 'nextcloud-custom:latest'
@@ -43,7 +44,7 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-      - name: Déploiement sur le VPS via SSH
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         env:
           SECURE_DB_PASS: ${{ env.DB_PASSWORD }}
@@ -54,9 +55,6 @@ jobs:
           key: ${{ env.VPS_SSH_KEY }}
           envs: SECURE_DB_PASS,SECURE_ADMIN_PASS
           script: |
-            docker --version || exit 1
-            docker compose version || exit 1
-            
             cd /home/${{ env.VPS_USERNAME }}/M2-Orchestration-Table3/V1
             git pull origin Mathis-Nextcloud
             
