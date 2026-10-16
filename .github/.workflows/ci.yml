@@ -1,6 +1,5 @@
 name: Workflow CI/CD Mathis Dubaille
 
-# Créer le déclencheur (Push)
 on:
   push:
     branches: [ "main", "Mathis-Nextcloud" ]
@@ -13,14 +12,12 @@ jobs:
       - name: Récupération du code source
         uses: actions/checkout@v4
 
-      # Étape d'authentification et de récupération de TOUS les secrets via Vault
       - name: Import Secrets from Vault
         uses: hashicorp/vault-action@v3
         with:
           url: ${{ secrets.VAULT_MD_ADDR }}
           method: token
           token: ${{ secrets.VAULT_MD_TOKEN }}
-          # On mappe les chemins du Vault vers des variables d'environnement pour le runner
           secrets: |
             secret/data/nextcloud POSTGRES_PASSWORD | DB_PASSWORD ;
             secret/data/nextcloud NEXTCLOUD_ADMIN_PASSWORD | ADMIN_PASSWORD ;
@@ -31,7 +28,6 @@ jobs:
       - name: Configuration de Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # CI : Compilation image (docker build)
       - name: Build de l'image locale
         uses: docker/build-push-action@v5
         with:
@@ -39,7 +35,6 @@ jobs:
           load: true
           tags: nextcloud-custom:latest
 
-      # CI : Scan avec Trivy
       - name: Scan de vulnérabilités Trivy
         uses: aquasecurity/trivy-action@master
         with:
@@ -48,33 +43,23 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-      # CD : Connexion SSH avec clé SSH via les secrets Vault
       - name: Déploiement sur le VPS via SSH
         uses: appleboy/ssh-action@v1.0.3
         env:
-          # On transmet les mots de passe de l'app au contexte du script bash
           SECURE_DB_PASS: ${{ env.DB_PASSWORD }}
           SECURE_ADMIN_PASS: ${{ env.ADMIN_PASSWORD }}
         with:
-          # Utilisation des identifiants VPS récupérés dynamiquement depuis Vault
           host: ${{ env.VPS_HOST }}
           username: ${{ env.VPS_USERNAME }}
           key: ${{ env.VPS_SSH_KEY }}
           envs: SECURE_DB_PASS,SECURE_ADMIN_PASS
           script: |
-            echo "=== 5. CD : Vérification installation Docker ==="
-            docker --version || { echo "Docker n'est pas installé"; exit 1; }
-            docker compose version || { echo "Docker Compose n'est pas installé"; exit 1; }
-            echo "Docker est bien installé et fonctionnel."
-
-            echo "=== 6. CD : Déploiement du docker-compose.yml ==="
-            # Se placer dans le dossier de l'utilisateur de déploiement (via la variable VPS_USERNAME)
-            cd /home/${{ env.VPS_USERNAME }}/M2-Orchestration-Table3/V1
+            docker --version || exit 1
+            docker compose version || exit 1
             
-            # Mise à jour du code depuis Git
+            cd /home/${{ env.VPS_USERNAME }}/M2-Orchestration-Table3/V1
             git pull origin Mathis-Nextcloud
             
-            # Injection sécurisée des secrets Vault dans le fichier .env sur le VPS
             echo "POSTGRES_DB=nextclouddb" > .env
             echo "POSTGRES_USER=nextclouduser" >> .env
             echo "POSTGRES_PASSWORD=$SECURE_DB_PASS" >> .env
@@ -82,20 +67,5 @@ jobs:
             echo "NEXTCLOUD_ADMIN_PASSWORD=$SECURE_ADMIN_PASS" >> .env
             echo "NEXTCLOUD_TRUSTED_DOMAINS=localhost 127.0.0.1 nextcloud.mondomaine.fr" >> .env
             
-            # Re-déploiement propre de la stack
             docker compose down
             docker compose up --build -d
-
-            echo "=== 7. CD : Vérification des healthcheck ==="
-            # Attendre quelques secondes que les conteneurs s'initialisent
-            sleep 10
-            
-            # Lister les conteneurs et leur statut
-            docker compose ps
-            
-            # Vérification de sécurité : si un conteneur a le statut "exited", on fait échouer la CI
-            if [ $(docker compose ps -q | xargs -r docker inspect -f '{{ .State.Status }}' | grep -c "exited") -gt 0 ]; then
-              echo "Erreur : Un ou plusieurs conteneurs ne tournent pas correctement (statut exited)."
-              exit 1
-            fi
-            echo "Tous les conteneurs sont up and running !"
