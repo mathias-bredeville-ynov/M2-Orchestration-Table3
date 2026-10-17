@@ -69,3 +69,4 @@ Pour tester la stack en local sans la CI/CD :
    ```bash
    docker compose up --build -d
    ```
+6. test 1
